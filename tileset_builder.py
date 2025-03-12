@@ -457,11 +457,27 @@ def run_pipeline(
     mask_path = os.path.join("mask", master_mask_choice)
     master_mask_rgb = Image.open(mask_path).convert("RGB")
 
-    # Generate base tiles
-    tile_size = determine_tile_size_from_master(master_mask_rgb)
-    grid_cols = master_mask_rgb.width // tile_size[0]
-    grid_rows = master_mask_rgb.height // tile_size[1]
+    # 1) Determine the original tile size from the master mask
+    orig_tile_size = determine_tile_size_from_master(master_mask_rgb)
+    grid_cols = master_mask_rgb.width  // orig_tile_size[0]
+    grid_rows = master_mask_rgb.height // orig_tile_size[1]
+
+    # 2) If the master mask’s tile size is different from the texture size (w,h), 
+    #    we rescale the master mask to match. Each tile becomes exactly w x h.
+    if orig_tile_size != (w, h):
+        new_width  = grid_cols * w
+        new_height = grid_rows * h
+        print(f"Resizing master mask from {master_mask_rgb.size} to {(new_width, new_height)}...")
+        master_mask_rgb = master_mask_rgb.resize((new_width, new_height), Image.Resampling.NEAREST)
+
+    # Now each tile is guaranteed to be (w, h).
+    tile_size = (w, h)
+
     feather_radius = math.sqrt(w*h) / 14
+    tiles, grid_size, _ = generate_tileset_from_master_mask(
+        master_mask_rgb, outside_texture, inside_texture, 
+        feather_radius, debug_mode=debug_mode
+    )
     tiles, grid_size, _ = generate_tileset_from_master_mask(
         master_mask_rgb, outside_texture, inside_texture, feather_radius, debug_mode=debug_mode
     )
