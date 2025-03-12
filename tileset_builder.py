@@ -606,7 +606,7 @@ with gr.Blocks(title="Tileset Generator") as demo:
             inside_texture_in = gr.Image(label="Inside Texture (white area)", type="pil")
 
             gr.Markdown("""
-            For more information on Master Masks and how to make your own go [here](example.com)
+            For more information on Master Masks and how to make your own go [here](https://github.com/Astropulse/tilesetbuilder?tab=readme-ov-file#adding-master-masks)
             """)
 
             master_mask_dropdown = gr.Dropdown(
