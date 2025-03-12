@@ -600,8 +600,8 @@ with gr.Blocks(title="Tileset Generator") as demo:
             gr.Markdown("""
             Get your key from [the developer tools section](https://www.retrodiffusion.ai/app/devtools)
             """)
-            outside_prompt_in = gr.Textbox(label="Outside Prompt", value="grass top view")
-            inside_prompt_in = gr.Textbox(label="Inside Prompt", value="mud")
+            outside_prompt_in = gr.Textbox(label="Outside Prompt", value="")
+            inside_prompt_in = gr.Textbox(label="Inside Prompt", value="")
             outside_texture_in = gr.Image(label="Outside Texture (black area)", type="pil")
             inside_texture_in = gr.Image(label="Inside Texture (white area)", type="pil")
 
