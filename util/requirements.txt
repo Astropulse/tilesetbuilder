@@ -1,0 +1,7 @@
+numpy==1.26.4
+Pillow==9.3.0
+matplotlib==3.10.0
+colour-science==0.4.6
+scikit-learn==1.5.1
+minisom==2.3.3
+gradio
