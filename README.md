@@ -23,4 +23,7 @@ The master masks must be in a sepecific format and arrangement. Follow the rules
 - White is the "inside" color.
 - Magenta is the "background" color. See the "platformer" tileset mask for an example of its use.
 - The top left tile must be a sold black tile the full size of all the tiles in the set, and it must not have other pieces of black next to it. The program uses this tile as a reference point to determine the size of the sheet.
+  ![image](https://github.com/user-attachments/assets/39de9a2f-67c7-4a27-a38c-a51e5769350f)
+
 - The sheet must be a size multiple of the top left tile.
+- You can have empty tiles, simply make the whole tile solid black, solid white, or solid magenta.
