@@ -181,60 +181,133 @@ def apply_seam_replacements(
 # PARTIAL TILE BLENDING
 # =============================================================================
 
-def partial_tile_black_white_then_magenta(mask_rgb, outside_img, inside_img,
-                                          feather_radius=5, noise_level=10):
+def partial_tile_black_white_then_magenta(mask_rgb,
+                                          outside_img,
+                                          inside_img,
+                                          feather_radius=5,
+                                          noise_level=10):
     """
-    For partial tiles, does a 2-step blend:
-      - black(0) vs. white(1), ignoring magenta(2) => treat as black
-      - then replaces the magenta region
+    Same partial-tile code you already have, plus a simple neighbor-cleanup 
+    pass that:
+      - looks only at the originally magenta region (label=2),
+      - finds pixels that ended up non-magenta, 
+      - counts how many of their 8 neighbors in that region have the same color,
+      - if fewer than 3 neighbors match => convert pixel to magenta.
     """
     w, h = mask_rgb.size
-
-    # Step A: Build submask for black vs white (ignore magenta => black)
+    
+    # -----------------------------------------------------------
+    # Step A: black vs white (ignore magenta => black)
+    # -----------------------------------------------------------
     submask_bw = Image.new("L", (w, h), 0)
     px_mask = mask_rgb.load()
     px_bw = submask_bw.load()
+
     for y in range(h):
         for x in range(w):
             label = classify_rgb_pixel(px_mask[x,y])
-            px_bw[x,y] = 255 if label == 1 else 0  # 1 => white, else black
+            px_bw[x,y] = 255 if label == 1 else 0
 
-    # Feather
     submask_bw = submask_bw.filter(ImageFilter.GaussianBlur(feather_radius))
     if noise_level > 0:
         submask_bw = add_noise_to_feather(submask_bw, noise_level)
 
-    bw_arr = np.array(submask_bw, dtype=np.float32)/255.0
+    bw_arr = np.array(submask_bw, dtype=np.float32) / 255.0
 
     outside_resized = outside_img.resize((w, h), Image.Resampling.NEAREST).convert("RGB")
     inside_resized  = inside_img.resize((w, h),  Image.Resampling.NEAREST).convert("RGB")
+
     out_arr = np.array(outside_resized, dtype=np.float32)
     in_arr  = np.array(inside_resized,  dtype=np.float32)
 
-    # Weighted blend => stepA
     stepA_arr = out_arr*(1 - bw_arr[...,None]) + in_arr*(bw_arr[...,None])
     stepA_arr = np.clip(stepA_arr, 0, 255).astype(np.uint8)
 
-    # Step B: now handle magenta(2) region
+    # -----------------------------------------------------------
+    # Step B: Randomly dither for magenta(2)
+    # -----------------------------------------------------------
+    # 1) 0/255 mask for magenta
     mask_m = Image.new("L", (w, h), 0)
     px_m = mask_m.load()
     for y in range(h):
         for x in range(w):
-            label = classify_rgb_pixel(px_mask[x,y])
-            px_m[x,y] = 255 if label == 2 else 0  # magenta => 255
+            if classify_rgb_pixel(px_mask[x,y]) == 2:
+                px_m[x,y] = 255
 
-    mask_m = mask_m.filter(ImageFilter.GaussianBlur(feather_radius))
+    # 2) Feather + noise => fractional probability
+    mask_m = mask_m.filter(ImageFilter.GaussianBlur(feather_radius/3))
     if noise_level > 0:
         mask_m = add_noise_to_feather(mask_m, noise_level)
 
-    m_arr = np.array(mask_m, dtype=np.float32)/255.0
-    stepA_float = stepA_arr.astype(np.float32)
-    magenta_arr = np.full((h,w,3), [255,0,255], dtype=np.float32)
+    m_arr = np.array(mask_m, dtype=np.float32) / 255.0
 
-    final_arr = stepA_float*(1 - m_arr[...,None]) + magenta_arr*(m_arr[...,None])
+    # 3) For each pixel => magenta if random < m_arr
+    random_map = np.random.random((h, w))
+    stepA_float = stepA_arr.astype(np.float32)
+    magenta_arr = np.full((h, w, 3), [255,0,255], dtype=np.float32)
+
+    magenta_mask = (random_map < m_arr)
+    final_arr = np.empty((h, w, 3), dtype=np.float32)
+    final_arr[ magenta_mask ] = magenta_arr[ magenta_mask ]
+    final_arr[~magenta_mask ] = stepA_float[~magenta_mask]
     final_arr = np.clip(final_arr, 0, 255).astype(np.uint8)
 
-    return Image.fromarray(final_arr, mode="RGB")
+    # -----------------------------------------------------------
+    # Cleanup: ONLY in originally magenta region (label=2).
+    # If a pixel ended up non-magenta, but doesn't have at least
+    # 3 neighbors of the same color, set it to magenta.
+    # -----------------------------------------------------------
+    # Build a boolean array: True => originally label=2
+    orig_mag = np.zeros((h, w), dtype=bool)
+    for y in range(h):
+        for x in range(w):
+            if classify_rgb_pixel(px_mask[x, y]) == 2:
+                orig_mag[y, x] = True
+
+    # Convert final_arr to a PIL image for easy neighbor checking
+    final_img = Image.fromarray(final_arr, mode="RGB")
+    px_final = final_img.load()  # so px_final[x, y] => (R,G,B)
+
+    neighbors_8 = [(-1,-1), (-1,0), (-1,1),
+                   (0,-1),          (0,1),
+                   (1,-1), (1,0),  (1,1)]
+
+    MAGENTA = (255,0,255)
+    def same_color(a, b):
+        return (a[0]==b[0]) and (a[1]==b[1]) and (a[2]==b[2])
+
+    # We'll make a copy so changes don't cause chain reactions
+    filtered_arr = final_arr.copy()
+
+    for y in range(h):
+        for x in range(w):
+            if not orig_mag[y, x]:
+                # Not originally magenta => skip
+                continue
+
+            current_color = px_final[x, y]
+            if same_color(current_color, MAGENTA):
+                # Already magenta => skip
+                continue
+
+            # Count how many neighbors in the *same region* 
+            # share the same color
+            same_count = 0
+            for dy, dx in neighbors_8:
+                ny, nx = y+dy, x+dx
+                if 0 <= ny < h and 0 <= nx < w:
+                    # We only consider neighbors that are also originally magenta
+                    if orig_mag[ny, nx]:
+                        neighbor_color = px_final[nx, ny]
+                        if same_color(neighbor_color, current_color):
+                            same_count += 1
+
+            # If fewer than 3 neighbors match => convert to magenta
+            if same_count < 3:
+                filtered_arr[y, x] = [255,0,255]
+
+    # Return final cleaned image
+    return Image.fromarray(filtered_arr.astype(np.uint8), mode="RGB")
 
 
 def generate_tileset_from_master_mask(
@@ -526,6 +599,15 @@ def run_pipeline(
 
     # Final quantize
     final_tileset = som_quantize_with_palette(final_tileset, combined)
+
+    # 2) Convert any pure magenta pixel to alpha=0
+    rgba_img = final_tileset.convert("RGBA")
+    arr = np.array(rgba_img, dtype=np.uint8)  # shape (H, W, 4)
+    magenta_mask = (arr[...,0] == 255) & (arr[...,1] == 0) & (arr[...,2] == 255)
+    arr[magenta_mask, 3] = 0
+
+    # Convert back to a PIL Image
+    final_tileset = Image.fromarray(arr, mode="RGBA")
 
     # Save final outputs
     final_tileset.save("final_tileset.png")
