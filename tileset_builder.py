@@ -489,10 +489,6 @@ def process_tile(
 
     # Post-process: downsize & SOM-quantize w/ tile as palette
     for image in images:
-        factor = 8
-        new_width = image.width // factor
-        new_height = image.height // factor
-        image = image.resize((new_width, new_height), Image.Resampling.NEAREST)
         image = som_quantize_with_palette(image, tile)
 
         if debug_mode:
